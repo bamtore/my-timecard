@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<!-- 勤怠打刻アプリ  Copyright (c) 2026 BM  Released under the MIT License. -->
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <title>勤怠打刻</title>
+  <meta name="theme-color" content="#16a34a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="勤怠打刻">
+  <meta name="robots" content="noindex">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <style>
+    :root {
+      --bg: #f5f6f8; --card: #fff; --text: #1f2328; --sub: #6b7280; --line: #eef0f3;
+      --in: #16a34a; --out: #dc2626; --break: #f59e0b; --resume: #2563eb;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; background: var(--bg); color: var(--text); }
+    body {
+      min-height: 100vh; display: flex; justify-content: center;
+      font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+      padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom);
+    }
+    main { width: 100%; max-width: 420px; padding: 20px 16px 40px; text-align: center; position: relative; }
+    .gear {
+      position: absolute; right: 12px; top: 12px; width: 40px; height: 40px; border: none;
+      background: transparent; font-size: 22px; color: var(--sub); cursor: pointer;
+    }
+    .date { color: var(--sub); font-size: 15px; margin-top: 8px; }
+    .clock { font-size: 56px; font-weight: 700; letter-spacing: 1px; font-variant-numeric: tabular-nums; }
+    .badge {
+      display: inline-block; margin: 8px 0 4px; padding: 6px 16px; border-radius: 999px;
+      font-size: 14px; font-weight: 600; background: #e5e7eb; color: #374151;
+    }
+    .badge.working { background: #dcfce7; color: #166534; }
+    .badge.break   { background: #fef3c7; color: #92400e; }
+    .elapsed { color: var(--sub); font-size: 14px; min-height: 20px; font-variant-numeric: tabular-nums; }
+
+    .main-btn {
+      width: 220px; height: 220px; margin: 28px auto 18px; border: none; border-radius: 50%;
+      background: #9ca3af; color: #fff; font-size: 34px; font-weight: 700; cursor: pointer; display: block;
+      box-shadow: 0 10px 30px rgba(0,0,0,.18); transition: transform .1s, opacity .2s;
+    }
+    .main-btn:active { transform: scale(.96); }
+    .main-btn small { display: block; font-size: 14px; font-weight: 500; opacity: .9; margin-top: 4px; }
+    .sub-btn {
+      width: 220px; padding: 14px; border-radius: 14px; border: 2px solid var(--break);
+      background: #fff; color: #92400e; font-size: 18px; font-weight: 700; cursor: pointer;
+    }
+    .hidden { visibility: hidden; }
+    button:disabled { opacity: .5; cursor: wait; }
+
+    .logs { margin-top: 32px; background: var(--card); border-radius: 14px; padding: 8px 16px; text-align: left; }
+    .logs h2 { font-size: 14px; color: var(--sub); margin: 8px 0; font-weight: 600; }
+    .logs ul { margin: 0; padding: 0; }
+    .logs li { list-style: none; display: flex; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--line); font-size: 15px; }
+
+    .toast {
+      position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom));
+      transform: translateX(-50%) translateY(160px);
+      background: #111827; color: #fff; padding: 12px 18px; border-radius: 12px; font-size: 14px;
+      max-width: 90%; transition: transform .3s; z-index: 20;
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+    .toast.error { background: #b91c1c; }
+
+    dialog { border: none; border-radius: 16px; padding: 20px; width: min(92vw, 400px); }
+    dialog::backdrop { background: rgba(0,0,0,.4); }
+    dialog h2 { margin: 0 0 12px; font-size: 18px; }
+    dialog label { display: block; text-align: left; font-size: 13px; color: var(--sub); margin: 12px 0 4px; }
+    dialog input {
+      width: 100%; padding: 12px; font-size: 15px; border: 1px solid #d1d5db; border-radius: 10px;
+    }
+    dialog p { font-size: 12px; color: var(--sub); text-align: left; line-height: 1.6; }
+    .row { display: flex; gap: 8px; margin-top: 16px; }
+    .row button { flex: 1; padding: 12px; border-radius: 10px; font-size: 15px; font-weight: 600; border: none; cursor: pointer; }
+    .primary { background: var(--in); color: #fff; }
+    .ghost { background: #e5e7eb; color: #374151; }
+  </style>
+</head>
+<body>
+  <main>
+    <button class="gear" id="gear" aria-label="設定">⚙</button>
+    <div class="date" id="date"></div>
+    <div class="clock" id="clock">--:--</div>
+    <div class="badge" id="badge">読み込み中…</div>
+    <div class="elapsed" id="elapsed"></div>
+
+    <button class="main-btn" id="mainBtn" disabled>…</button>
+    <button class="sub-btn hidden" id="subBtn"></button>
+
+    <section class="logs">
+      <h2>最近の打刻</h2>
+      <ul id="logs"></ul>
+    </section>
+  </main>
+
+  <dialog id="settings">
+    <form method="dialog" id="settingsForm">
+      <h2>接続設定</h2>
+      <label for="cfgUrl">GAS ウェブアプリ URL</label>
+      <input id="cfgUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec" required autocomplete="off">
+      <label for="cfgToken">APIトークン</label>
+      <input id="cfgToken" type="password" required autocomplete="off">
+      <p>設定はこの端末の中だけに保存され、外部には送信されません（打刻時にGASへ送るのみ）。</p>
+      <div class="row">
+        <button type="button" class="ghost" id="cancelBtn">閉じる</button>
+        <button type="submit" class="primary">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const CFG_KEY = 'kintai-config';
+    let cfg = readCfg();
+    let state = { status: 'off', logs: [] };
+    let offset = 0;
+
+    const VIEW = {
+      off:     { badge: '未出勤', main: ['出勤', 'in', 'var(--in)'],  sub: null },
+      working: { badge: '勤務中', main: ['退勤', 'out', 'var(--out)'], sub: ['☕ 休憩する', 'breakStart'] },
+      break:   { badge: '休憩中', main: ['休憩終了', 'breakEnd', 'var(--resume)'], sub: ['退勤する', 'out'] },
+    };
+
+    function readCfg() {
+      try { return JSON.parse(localStorage.getItem(CFG_KEY)) || {}; } catch { return {}; }
+    }
+    function writeCfg(c) {
+      try { localStorage.setItem(CFG_KEY, JSON.stringify(c)); } catch {}
+      cfg = c;
+    }
+
+    async function api(action) {
+      if (!cfg.url || !cfg.token) throw new Error('接続設定をしてください');
+      // Content-Type を付けない（text/plain）ことで CORS プリフライトを回避
+      const res = await fetch(cfg.url, {
+        method: 'POST',
+        body: JSON.stringify({ token: cfg.token, action }),
+        redirect: 'follow',
+      });
+      if (!res.ok) throw new Error('通信エラー（' + res.status + '）');
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error);
+      return json.data;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    function render() {
+      const v = VIEW[state.status] || VIEW.off;
+      $('badge').textContent = v.badge;
+      $('badge').className = 'badge ' + state.status;
+
+      const [label, action, color] = v.main;
+      $('mainBtn').innerHTML = label + '<small>タップで打刻</small>';
+      $('mainBtn').style.background = color;
+      $('mainBtn').dataset.action = action;
+
+      if (v.sub) {
+        $('subBtn').textContent = v.sub[0];
+        $('subBtn').dataset.action = v.sub[1];
+        $('subBtn').classList.remove('hidden');
+      } else {
+        $('subBtn').classList.add('hidden');
+      }
+
+      $('logs').innerHTML = (state.logs || []).map(
+        (l) => `<li><span>${escapeHtml(l.type)}</span><span>${escapeHtml(l.time)}</span></li>`
+      ).join('') || '<li><span>まだ打刻がありません</span></li>';
+      tick();
+    }
+
+    function fmt(ms) {
+      const m = Math.max(0, Math.floor(ms / 60000));
+      return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+    }
+
+    function tick() {
+      const now = new Date(Date.now() + offset);
+      $('clock').textContent = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      $('date').textContent = now.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
+
+      if (state.status === 'off' || !state.start) { $('elapsed').textContent = ''; return; }
+      let breakMs = state.breakMinutes * 60000;
+      if (state.status === 'break') breakMs += now - state.breakStart;
+      const work = now - state.start - breakMs;
+      $('elapsed').textContent = state.status === 'break'
+        ? `休憩 ${fmt(now - state.breakStart)} 経過 ／ 実働 ${fmt(work)}`
+        : `実働 ${fmt(work)} ／ 休憩 ${fmt(breakMs)}`;
+    }
+
+    function apply(res) {
+      state = res;
+      offset = res.serverTime - Date.now();
+      render();
+      if (res.message) toast(res.message);
+    }
+
+    function setBusy(b) { $('mainBtn').disabled = b; $('subBtn').disabled = b; }
+
+    async function run(action) {
+      setBusy(true);
+      try {
+        apply(await api(action));
+      } catch (err) {
+        toast(err.message, true);
+        if (action !== 'status') load();
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    function load() { return run('status'); }
+
+    function doPunch(action) {
+      if (navigator.vibrate) navigator.vibrate(30);
+      run(action);
+    }
+
+    let toastTimer;
+    function toast(msg, isError) {
+      const t = $('toast');
+      t.textContent = msg;
+      t.className = 'toast show' + (isError ? ' error' : '');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => (t.className = 'toast'), 3500);
+    }
+
+    function openSettings() {
+      $('cfgUrl').value = cfg.url || '';
+      $('cfgToken').value = cfg.token || '';
+      $('settings').showModal();
+    }
+
+    $('settingsForm').addEventListener('submit', () => {
+      writeCfg({ url: $('cfgUrl').value.trim(), token: $('cfgToken').value.trim() });
+      load();
+    });
+    $('cancelBtn').onclick = () => $('settings').close();
+    $('gear').onclick = openSettings;
+    $('mainBtn').onclick = (e) => doPunch(e.currentTarget.dataset.action);
+    $('subBtn').onclick = (e) => doPunch(e.currentTarget.dataset.action);
+
+    // アプリに戻ってきた時に最新状態を取得
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && cfg.url) load();
+    });
+
+    setInterval(tick, 1000);
+    render();
+    if (cfg.url && cfg.token) load();
+    else { setBusy(true); $('badge').textContent = '未設定'; openSettings(); }
+
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  </script>
+</body>
+</html>
